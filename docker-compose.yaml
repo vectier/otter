@@ -1,0 +1,34 @@
+services:
+  master:
+    image: chrislusf/seaweedfs:3.77
+    command: master -ip=master -ip.bind=0.0.0.0 -metricsPort=9324
+    ports:
+      - 9333:9333
+      - 19333:19333
+      - 9324:9324
+  volume:
+    image: chrislusf/seaweedfs:3.77
+    command: volume -dir=/mnt/weed/volume/ -mserver=master:9333 -ip.bind=0.0.0.0 -port=8080 -metricsPort=9325
+    ports:
+      - 8080:8080
+      - 18080:18080
+      - 9325:9325
+    volumes:
+      - ./.docker/weed/volume/:/mnt/weed/volume/
+    depends_on:
+      - master
+  filer:
+    image: chrislusf/seaweedfs:3.77
+    command: filer -master=master:9333 -ip.bind=0.0.0.0 -metricsPort=9326
+    ports:
+      - 8888:8888
+      - 18888:18888
+      - 9326:9326
+    volumes:
+      - ./.docker/weed/filer/:/mnt/weed/filer/
+      - ./.docker/weed/filer.toml:/etc/seaweedfs/filer.toml
+    tty: true
+    stdin_open: true
+    depends_on:
+      - master
+      - volume

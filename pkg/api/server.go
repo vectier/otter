@@ -29,16 +29,12 @@ func (s *server) setupRoutes() {
 	r := chi.NewRouter()
 	s.s.Handler = r
 
-	r.Get("/*", handle(s.GetFile))
+	r.Get("/*", s.GetFile)
 }
 
-func handle(f func(w http.ResponseWriter, r *http.Request) error) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := f(w, r); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("internal server error"))
-		}
-	}
+func response(w http.ResponseWriter, statusCode int, body string) {
+	w.WriteHeader(statusCode)
+	w.Write([]byte(body))
 }
 
 func (s *server) Serve() <-chan struct{} {

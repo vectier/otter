@@ -2,7 +2,6 @@ package seaweedfs
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/url"
 )
@@ -16,9 +15,7 @@ type client struct {
 	masterURL string
 	filerURL  string
 	c         *http.Client
-
-	// Buffer to pipe the file from SeaweedFS to io.Writer
-	pipeBuf *pipeBufferPool
+	pipe      *pipe
 }
 
 func NewClient(masterURL string, filerURL string) Client {
@@ -26,7 +23,7 @@ func NewClient(masterURL string, filerURL string) Client {
 		masterURL: masterURL,
 		filerURL:  filerURL,
 		c:         &http.Client{},
-		pipeBuf:   newPipeBufferPool(),
+		pipe:      newPipe(),
 	}
 }
 
@@ -49,15 +46,15 @@ func (c *client) PipeFile(ctx context.Context, path string, w http.ResponseWrite
 	}
 	defer resp.Body.Close()
 
+	// Copy response headers from SeaweedFS
 	header := w.Header()
 	for k, v := range resp.Header {
 		header.Set(k, v[0])
 	}
 	header.Set("Server", "Otter v1.0.0")
 
-	buf := c.pipeBuf.Get()
-	defer c.pipeBuf.Release(buf)
+	// Copy response status code from SeaweedFS
+	w.WriteHeader(resp.StatusCode)
 
-	_, err = io.CopyBuffer(w, resp.Body, *buf)
-	return err
+	return c.pipe.Pipe(w, resp.Body)
 }

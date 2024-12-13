@@ -1,6 +1,8 @@
 package seaweedfs
 
 import (
+	"bytes"
+	"io"
 	"sync"
 
 	"github.com/rs/zerolog/log"
@@ -10,32 +12,32 @@ var (
 	maxPipeBufferSize = 64 * 1024 // 64 kB
 )
 
-type pipeBufferPool struct {
+type pipe struct {
 	pool *sync.Pool
 }
 
-func newPipeBufferPool() *pipeBufferPool {
+func newPipe() *pipe {
 	pool := sync.Pool{
-		New: func() any {
+		New: func() interface{} {
 			log.Debug().Msg("create a new pipe buffer in the pool")
-			buf := make(pipeBuffer, maxPipeBufferSize)
-			return &buf
+			return new(bytes.Buffer)
 		},
 	}
-	return &pipeBufferPool{pool: &pool}
+	return &pipe{pool: &pool}
 }
 
-func (p *pipeBufferPool) Get() *pipeBuffer {
-	return p.pool.Get().(*pipeBuffer)
+func (p *pipe) Pipe(dst io.Writer, src io.Reader) error {
+	buf := p.get()
+	defer p.release(buf)
+	_, err := io.CopyBuffer(dst, src, buf.Bytes())
+	return err
 }
 
-func (p *pipeBufferPool) Release(b *pipeBuffer) {
+func (p *pipe) get() *bytes.Buffer {
+	return p.pool.Get().(*bytes.Buffer)
+}
+
+func (p *pipe) release(b *bytes.Buffer) {
 	b.Reset()
 	p.pool.Put(b)
-}
-
-type pipeBuffer []byte
-
-func (b *pipeBuffer) Reset() {
-	*b = (*b)[:maxPipeBufferSize]
 }

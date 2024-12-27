@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"syscall"
 	"time"
 )
 
@@ -87,7 +88,7 @@ func (c *client) PipeFile(ctx context.Context, path string, w http.ResponseWrite
 		}
 	}
 
-	if _, err := io.Copy(w, resp.Body); err != nil {
+	if _, err := io.Copy(w, resp.Body); err != nil && !errors.Is(err, syscall.EPIPE) {
 		return fmt.Errorf("streaming seaweedfs: %w", err)
 	}
 	return nil

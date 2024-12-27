@@ -1,14 +1,13 @@
 package seaweedfs
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 )
 
@@ -34,7 +33,6 @@ type client struct {
 	masterURL string
 	filerURL  string
 	c         *http.Client
-	pipe      *pipe
 }
 
 func NewClient(masterURL string, filerURL string) Client {
@@ -42,7 +40,6 @@ func NewClient(masterURL string, filerURL string) Client {
 		masterURL: masterURL,
 		filerURL:  filerURL,
 		c:         &http.Client{},
-		pipe:      newPipe(),
 	}
 }
 
@@ -59,14 +56,14 @@ func (c *client) GetFile(ctx context.Context, path string) (*http.Response, erro
 	return c.c.Do(req)
 }
 
-func (c *client) PipeFile(ctx context.Context, path string, w http.ResponseWriter) (err error) {
+func (c *client) PipeFile(ctx context.Context, path string, w http.ResponseWriter) error {
 	resp, err := c.GetFile(ctx, path)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	// Copy response headers from SeaweedFS
+	// Copy response headers from SeaweedFS and override headers as needed
 	header := w.Header()
 	for k, v := range resp.Header {
 		header.Set(k, v[0])
@@ -78,19 +75,20 @@ func (c *client) PipeFile(ctx context.Context, path string, w http.ResponseWrite
 		return errors.New("nothing in this path")
 	}
 
-	// Directory doesn't have Etag header
+	// If the target is a directory, return a list of contents inside the directory in JSON format
+	// by checking the Etag header. This doesn't exist if the path is a directory
 	if resp.Header.Get("Etag") == "" {
 		var directoryList directoryList
 		if err := json.NewDecoder(resp.Body).Decode(&directoryList); err != nil {
 			return fmt.Errorf("cannot list directory entries: %w", err)
 		}
-		output, err := json.Marshal(directoryList.Entries)
-		if err != nil {
+		if err := json.NewEncoder(w).Encode(directoryList.Entries); err != nil {
 			return fmt.Errorf("cannot marshal directory entries list: %w", err)
 		}
-		header.Set("Content-Length", strconv.Itoa(len(output)))
-		return c.pipe.Pipe(w, bytes.NewReader(output))
 	}
 
-	return c.pipe.Pipe(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		return fmt.Errorf("streaming seaweedfs: %w", err)
+	}
+	return nil
 }

@@ -18,7 +18,6 @@ func (s *server) GetFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := chi.URLParam(r, "*")
-	canAccess := false
 
 	for _, glob := range claims.GrantedDirectories {
 		match, err := doublestar.Match(glob, path)
@@ -28,16 +27,12 @@ func (s *server) GetFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if match {
-			canAccess = true
-			break
+			if err := s.sc.PipeFile(r.Context(), path, w); err != nil {
+				log.Err(err).Msg("cannot pipe file")
+			}
+			return
 		}
 	}
-	if !canAccess {
-		response(w, http.StatusForbidden, "forbidden")
-		return
-	}
 
-	if err := s.sc.PipeFile(r.Context(), path, w); err != nil {
-		log.Err(err).Msg("cannot pipe file")
-	}
+	response(w, http.StatusForbidden, "forbidden")
 }

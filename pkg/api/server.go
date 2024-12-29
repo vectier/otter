@@ -2,10 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -37,27 +35,40 @@ func response(w http.ResponseWriter, statusCode int, body string) {
 	w.Write([]byte(body))
 }
 
-func (s *server) Serve() <-chan struct{} {
+func (s *server) Serve(stopCh <-chan struct{}) <-chan struct{} {
 	s.setupRoutes()
 
-	shutdownCh := make(chan struct{})
-	closeCh := make(chan os.Signal, 1)
-	signal.Notify(closeCh, os.Interrupt, syscall.SIGTERM)
-
 	go func() {
-		log.Info().Msg("server is listening")
-		_ = s.s.ListenAndServe()
+		log.Info().Str("addr", s.s.Addr).Msg("server is listening")
+		if err := s.s.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal().Msg("cannot listen and serve the server")
+		}
 	}()
 
+	stoppedCh := make(chan struct{})
 	go func() {
-		<-closeCh
+		<-stopCh
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		defer close(stoppedCh)
 
-		_ = s.s.Shutdown(ctx)
-		log.Info().Msg("server is gracefully shutdown")
-		shutdownCh <- struct{}{}
+		shutdownErr := make(chan error)
+		go func() {
+			shutdownErr <- s.s.Shutdown(ctx)
+		}()
+
+		select {
+		case err := <-shutdownErr:
+			if err != nil {
+				log.Error().Err(err).Msg("cannot shutdown server gracefully")
+			} else {
+				log.Info().Msg("shutdown server gracefully")
+			}
+		case <-ctx.Done():
+			log.Warn().Msg("shutdown timeout exceed, force shutdown server")
+			_ = s.s.Close()
+		}
 	}()
 
-	return shutdownCh
+	return stoppedCh
 }
